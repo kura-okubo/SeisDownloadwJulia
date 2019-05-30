@@ -74,7 +74,7 @@ for stid = 1:length(stlist) #to be parallelized
 
     if rank == processID-1
 
-        S[stid] = Array{SeisData, 1}(undef, length(Station)); #S[timeid][sta,net,cha id]
+        S[stid] = Array{SeisData, 1}(undef, length(Station));
 
         for networkid = 1:length(Network)
         	for stationid = 1:length(Station)
