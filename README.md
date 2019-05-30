@@ -1,5 +1,5 @@
 # SeisDownloadwJulia
-Download Seismic data from server with SeisIO.jl
+Download Seismic data from server with [SeisIO.jl](https://github.com/jpjones76/SeisIO.jl)
 
 # Usage
 `sh run_downloadsctipt.sh -n 1`
