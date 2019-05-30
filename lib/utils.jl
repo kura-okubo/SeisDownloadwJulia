@@ -1,6 +1,6 @@
 module Utils
-export get_starttimelist, initlogo
-using Dates
+export get_starttimelist, initlogo, save_SeisData2JLD2
+using Dates, JLD2, FileIO, SeisIO
 """
 get_starttimelist(st::DateTime, et::DateTime, unittime::Float64)
 calculate start time list for parallel downloading
@@ -32,6 +32,22 @@ function get_starttimelist(st::DateTime, et::DateTime, unittime::Real)
 
     return stlist
 end
+
+
+"""
+save_SeisData2JLD2(foname::String, groupname::String, S::SeisData)
+save SeisData structure to JLD2
+"""
+function save_SeisData2JLD2(foname::String, varname::String, S::SeisData)
+
+    file = jldopen(foname*".jld2", "r+")
+    file[varname] = S[1]
+    JLD2.close(file)
+
+    return nothing
+end
+
+
 
 """
 initlogo()

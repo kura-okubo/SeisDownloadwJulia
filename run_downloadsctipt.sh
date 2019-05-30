@@ -19,4 +19,4 @@ else
 fi
 
 #specify absolute path to julia
-mpirun -np ${np} /Applications/Julia-1.1.app/Contents/Resources/julia/bin/julia ./SeisDownloadwJulia_v1.0.0.jl
+mpirun -np ${np} /Applications/Julia-1.1.app/Contents/Resources/julia/bin/julia ./SeisDownloadwJulia_v1.0.1.jl

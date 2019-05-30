@@ -1,9 +1,5 @@
 """
-Download seismic data from server
-
-# Seisdata array structure
-
-S[network_id][station_id][cnannel_id] gives a SeisData structure
+Download seismic data from server and save to JLD2 file.
 
 May 29, 2019
 Kurama Okubo
@@ -25,14 +21,14 @@ using .Remove_response_obspy
 
 #---parameters---#
 Network     = ["BP"]
-#Station    = ["LCCB", "MMNB", "VCAB", "CCRB"]
-Station     = ["LCCB", "MMNB"]
-#Channels   = ["BP1", "BP2", "BP3"]
-Channels    = ["BP1", "BP2", "BP3"]
+Station    = ["LCCB", "MMNB", "VCAB", "CCRB"]
+#Station     = ["LCCB", "MMNB"]
+Channels   = ["BP1", "BP2", "BP3"]
+#Channels    = ["BP1"]
 src         = "NCEDC" #Data servise center
 
-Starttime   = DateTime(2004,9,28,0,0,0)
-Endtime     = DateTime(2004,9,28,24,0,0)
+Starttime   = DateTime(2004,6,1,0,0,0)
+Endtime     = DateTime(2004,6,2,0,0,0)
 CC_time_unit = 3600 # minimum time unit for cross-correlation [s]
 
 pre_filt    = (0.001, 0.002, 10.0, 20.0) #prefilter of remove_response: taper between f1 and f2, f3 and f4
@@ -61,81 +57,111 @@ if size > MAXMPINUM throw(DomainError(size, "np must be smaller than $MAXMPINUM.
 # calculate start time with each CC_time_unit
 stlist = get_starttimelist(Starttime, Endtime, CC_time_unit)
 
-S = Array{Any, 1}(undef, length(stlist));
+# save download information in JLD2
+if rank == 0
+    jldopen(foname*".jld2", "w") do file
+        file["info/Network"]     = Network
+        file["info/Station"]     = Station
+        file["info/Channels"]    = Channels
+        file["info/Starttime"]   = string(Starttime)
+        file["info/Endtime"]     = string(Endtime)
+        file["info/CC_time_unit"]= string(CC_time_unit)
+    end
+end
 
 mpiitrcount = 0
+baton = Array{Int32, 1}([0]) # for Relay Dumping algorithm
 
 # progress bar
 if rank == 0 prog = Progress(floor(Int, length(stlist)/size), 1.0) end
 
 for stid = 1:length(stlist) #to be parallelized
-
     processID = stid - (size * mpiitrcount)
+
+    # if this mpiitrcount is final round or not
+    length(stlist) - size >= size * mpiitrcount ? anchor_rank = size-1 : anchor_rank = mod(length(stlist), size)-1
 
     if rank == processID-1
 
-        S[stid] = Array{SeisData, 1}(undef, length(Station));
-
         for networkid = 1:length(Network)
-        	for stationid = 1:length(Station)
 
-                ns_id = (networkid-1)*(length(Station)) + stationid
-                S[stid][ns_id] = SeisData(length(Channels)) #S[timeid][sta,netid][cha id]
+        	for stationid = 1:length(Station)
 
                 for channelsid = 1:length(Channels)
 
                     requeststr = @sprintf("%s.%s..%s", Network[networkid], Station[stationid], Channels[channelsid])
 
                     #---download data---#
-                    Stemp = get_data("NCEDC", requeststr, s=stlist[stid],t=CC_time_unit, v=0, src=src, w=false, xf="$requeststr.$stid.xml")
+                    S = get_data("NCEDC", requeststr, s=stlist[stid],t=CC_time_unit, v=0, src=src, w=false, xf="$requeststr.$stid.xml")
 
                     #---remove response---#
-                    Remove_response_obspy.remove_response_obspy!(Stemp, "$requeststr.$stid.xml", pre_filt=pre_filt, output="VEL")
+                    Remove_response_obspy.remove_response_obspy!(S, "$requeststr.$stid.xml", pre_filt=pre_filt, output="VEL")
                     if IsRemoveStationXML rm("$requeststr.$stid.xml") end
 
                     #---check for gaps---#
-                    SeisIO.ungap!(Stemp)
+                    SeisIO.ungap!(S)
 
                     #---remove earthquakes---#
                     # NOT IMPLEMENTED YET!
 
                     #---detrend---#
-                    SeisIO.detrend!(Stemp)
+                    SeisIO.detrend!(S)
 
                     #---bandpass filter---#
-                    SeisIO.filtfilt!(Stemp,fl=0.01,fh=0.9*(0.5*Stemp.fs[1])) #0.9*Nyquist frequency
+                    SeisIO.filtfilt!(S,fl=0.01,fh=0.9*(0.5*S.fs[1])) #0.9*Nyquist frequency
 
                     #---taper---#
-                    SeisIO.taper!(Stemp,t_max=30.0,α=0.05)
+                    SeisIO.taper!(S,t_max=30.0,α=0.05)
 
                     #---sync starttime---#
-                    SeisIO.sync!(Stemp,s=DateTime(stlist[stid]),t=DateTime(stlist[stid])+Dates.Second(CC_time_unit))
+                    SeisIO.sync!(S,s=DateTime(stlist[stid]),t=DateTime(stlist[stid])+Dates.Second(CC_time_unit))
 
                     #---down sampling---#
                     # Note: filtering should be first then down sampling
-                    Stemp = Noise.downsample(Stemp, float(downsample_fs))
-                    SeisIO.note!(Stemp, "downsample!, downsample_fs=$downsample_fs")
+                    S = Noise.downsample(S, float(downsample_fs))
+                    SeisIO.note!(S, "downsample!, downsample_fs=$downsample_fs")
 
-                    #store Stemp to S
-                    S[stid][ns_id][channelsid] = Stemp[1]
+                    #save data to JLD2 file
+                    yj = parse(Int64,stlist[stid][1:4])
+                    dj = md2j(yj, parse(Int64,stlist[stid][6:7]), parse(Int64,stlist[stid][9:10]))
+                    groupname    = string(yj)*"."*string(dj)*"."*stlist[stid][11:19] #Year_Julianday_Starttime
+                    varname = groupname*"/"*requeststr
 
+                    # Relay Data Dumping algorithm to aboid writing conflict with MPI
+                    if size == 1
+                        save_SeisData2JLD2(foname, varname, S)
+
+                    else
+                        if rank == 0
+                            save_SeisData2JLD2(foname, varname, S)
+
+                            if anchor_rank != 0
+                                MPI.Send(baton, rank+1, 11, comm)
+                                MPI.Recv!(baton, anchor_rank, 12, comm)
+                            end
+
+                        elseif rank == anchor_rank
+                            MPI.Recv!(baton, rank-1, 11, comm)
+                            save_SeisData2JLD2(foname, varname, S)
+                            MPI.Send(baton, 0, 12, comm)
+
+                        else
+                            MPI.Recv!(baton, rank-1, 11, comm)
+                            save_SeisData2JLD2(foname, varname, S)
+                            MPI.Send(baton, rank+1, 11, comm)
+                        end
+                    end
                 end
             end
         end
-
         #println("stid:$stid done by rank $rank out of $size processors")
         global mpiitrcount += 1
 
         #progress bar
         if rank == 0 next!(prog) end
-
     end
 end
 
-#save struct
-if rank == 0
-    @save foname*".jld2" S
-    println("Downloading data is successfully done.")
-end
+if rank == 0 println("Downloading and Saving data is successfully done.\njob ended at "*string(now())) end
 
 MPI.Finalize()
