@@ -1,5 +1,7 @@
+using JLD2, SeisIO, FileIO
+
 foname      = "./data/SeisData_BP" #output name
-file = jldopen(foname*".jld2", "r")
+file2 = jldopen(foname*".jld2", "r")
 
 Starttime   = DateTime(2004,9,28,0,0,0)
 

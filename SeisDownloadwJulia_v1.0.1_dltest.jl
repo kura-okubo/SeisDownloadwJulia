@@ -31,12 +31,13 @@ Starttime   = DateTime(2004,6,1,0,0,0)
 Endtime     = DateTime(2004,6,2,0,0,0)
 CC_time_unit = 3600 # minimum time unit for cross-correlation [s]
 
+downloadidname = "1day" #for dl speed test
+
 pre_filt    = (0.001, 0.002, 10.0, 20.0) #prefilter of remove_response: taper between f1 and f2, f3 and f4
 downsample_fs = 20; #downsampling rate after filtering
 MAXMPINUM   = 32 #Limit np for parallel downloading
 
 IsRemoveStationXML = true #Removing all StationXML. (instrumental response is automatically removed before removing XML)
-foname      = "./data/SeisData_BP" #output name
 #----------------#
 
 MPI.Init()
@@ -45,6 +46,8 @@ MPI.Init()
 comm = MPI.COMM_WORLD
 size = MPI.Comm_size(comm)
 rank = MPI.Comm_rank(comm)
+
+foname      = @sprintf("./data/SeisData_BP_np%02d", size) #output name
 
 # print initial logo and info
 if rank == 0 Utils.initlogo() end
@@ -74,6 +77,9 @@ baton = Array{Int32, 1}([0]) # for Relay Dumping algorithm
 
 # progress bar
 if rank == 0 prog = Progress(floor(Int, length(stlist)/size), 1.0,  "Downloading Seismic Data...") end
+
+#time
+if rank == 0 t1 = now() end
 
 for stid = 1:length(stlist) #to be parallelized
     processID = stid - (size * mpiitrcount)
@@ -165,3 +171,11 @@ end
 if rank == 0 println("Downloading and Saving data is successfully done.\njob ended at "*string(now())) end
 
 MPI.Finalize()
+
+if rank == 0
+    totaltime = (now()- t1).value / 1e3 / 60 #[min]
+    jldopen("./Downloadtime_$downloadidname.jld2", "a") do file
+    vartimename = @sprintf("np%02d", size)
+    file[vartimename] = totaltime
+    end
+end
